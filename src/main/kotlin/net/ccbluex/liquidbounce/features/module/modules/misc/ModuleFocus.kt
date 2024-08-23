@@ -18,6 +18,8 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.misc
 
+import net.ccbluex.liquidbounce.event.events.TagEntityEvent
+import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.features.module.Category
 import net.ccbluex.liquidbounce.features.module.Module
 import net.minecraft.client.network.AbstractClientPlayerEntity
@@ -29,12 +31,24 @@ import net.minecraft.client.network.AbstractClientPlayerEntity
  */
 object ModuleFocus : Module("Focus", Category.MISC) {
 
-    val usernameFocus by text("Username", "Notch")
+    private val usernames by textArray("Usernames", mutableListOf("Notch"))
 
     /**
      * This option will only focus the enemy on combat modules
      */
-    val combatFocus by boolean("Combat", false)
+    private val combatOnly by boolean("Combat", false)
+
+    val tagEntityEvent = handler<TagEntityEvent> {
+        if (it.entity !is AbstractClientPlayerEntity || isInFocus(it.entity)) {
+            return@handler
+        }
+
+        if (combatOnly) {
+            it.dontTarget()
+        } else {
+           it.ignore()
+        }
+    }
 
     /**
      * Check if [entity] is in your focus
@@ -45,7 +59,8 @@ object ModuleFocus : Module("Focus", Category.MISC) {
         }
 
         val name = entity.gameProfile.name
-        return name == usernameFocus
+
+        return usernames.any { it.equals(name, ignoreCase = true) }
     }
 
 }

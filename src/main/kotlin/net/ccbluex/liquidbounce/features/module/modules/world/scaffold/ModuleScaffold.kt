@@ -36,22 +36,21 @@ import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.ModuleSca
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.ModuleScaffold.ScaffoldRotationConfigurable.rotationTiming
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.ScaffoldBlockItemSelection.isValidBlock
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.features.*
-import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.ScaffoldBreezilyTechnique
-import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.ScaffoldGodBridgeTechnique
-import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.ScaffoldNormalTechnique
-import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.ScaffoldTechnique
+import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.*
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.normal.ScaffoldDownFeature
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.techniques.normal.ScaffoldEagleFeature
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.tower.ScaffoldTowerKarhu
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.tower.ScaffoldTowerMotion
 import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.tower.ScaffoldTowerPulldown
+import net.ccbluex.liquidbounce.features.module.modules.world.scaffold.tower.ScaffoldTowerVulcan
 import net.ccbluex.liquidbounce.render.engine.Color4b
 import net.ccbluex.liquidbounce.utils.aiming.RotationManager
 import net.ccbluex.liquidbounce.utils.aiming.RotationsConfigurable
-import net.ccbluex.liquidbounce.utils.aiming.raycast
 import net.ccbluex.liquidbounce.utils.block.PlacementSwingMode
 import net.ccbluex.liquidbounce.utils.block.doPlacement
-import net.ccbluex.liquidbounce.utils.block.targetFinding.BlockPlacementTarget
+import net.ccbluex.liquidbounce.utils.block.getCenterDistanceSquared
+import net.ccbluex.liquidbounce.utils.block.getState
+import net.ccbluex.liquidbounce.utils.block.targetfinding.BlockPlacementTarget
 import net.ccbluex.liquidbounce.utils.client.SilentHotbar
 import net.ccbluex.liquidbounce.utils.client.Timer
 import net.ccbluex.liquidbounce.utils.combat.ClickScheduler
@@ -99,10 +98,11 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
         ScaffoldNormalTechnique,
         arrayOf(
             ScaffoldNormalTechnique,
+            ScaffoldExpandTechnique,
             ScaffoldGodBridgeTechnique,
             ScaffoldBreezilyTechnique
         )
-    )
+    ).apply { tagBy(this) }
 
     private val sameYMode by enumChoice("SameY", SameYMode.OFF)
 
@@ -126,7 +126,7 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
     val towerMode = choices<Choice>("Tower", {
         it.choices[0] // None
     }) {
-        arrayOf(NoneChoice(it), ScaffoldTowerMotion, ScaffoldTowerPulldown, ScaffoldTowerKarhu)
+        arrayOf(NoneChoice(it), ScaffoldTowerMotion, ScaffoldTowerPulldown, ScaffoldTowerKarhu, ScaffoldTowerVulcan)
     }
 
     val isTowering: Boolean
@@ -238,7 +238,7 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
             PreferFullCubeBlocks,
             PreferWalkableBlocks,
             PreferAverageHardBlocks,
-            PreferStackSize(higher = true),
+            PreferStackSize(higher = false),
         )
 
     override fun enable() {
@@ -392,9 +392,7 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
         } else {
             RotationManager.serverRotation
         }
-
-        val currentCrosshairTarget = raycast(currentRotation)
-
+        val currentCrosshairTarget = technique.activeChoice.getCrosshairTarget(target, currentRotation)
         val currentDelay = delay.random()
 
         var hasBlockInMainHand = isValidBlock(player.inventory.getStack(player.inventory.selectedSlot))
@@ -495,10 +493,18 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
         }
     }
 
-    private fun findBestValidHotbarSlotForTarget() =
-        findPlaceableSlots()
+    private fun findBestValidHotbarSlotForTarget(): Int? {
+        val placeableSlots = findPlaceableSlots()
+        val doNotUseBelowCount = ScaffoldAutoBlockFeature.doNotUseBelowCount
+
+        val (slot, _) = placeableSlots
+            .filter { (_, stack) -> stack.count > doNotUseBelowCount }
             .maxWithOrNull { o1, o2 -> BLOCK_COMPARATOR_FOR_HOTBAR.compare(o1.second, o2.second) }
-            ?.first
+            ?: placeableSlots.maxWithOrNull { o1, o2 -> BLOCK_COMPARATOR_FOR_HOTBAR.compare(o1.second, o2.second) }
+            ?: return null
+
+        return slot
+    }
 
     internal fun isValidCrosshairTarget(rayTraceResult: BlockHitResult): Boolean {
         val diff = rayTraceResult.pos - player.eyes
@@ -518,7 +524,7 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
     }
 
     internal fun getTargetedPosition(blockPos: BlockPos): BlockPos {
-        if (ScaffoldDownFeature.shouldGoDown) {
+        if (ScaffoldDownFeature.handleEvents() && ScaffoldDownFeature.shouldGoDown) {
             return blockPos.add(0, -2, 0)
         }
 
@@ -535,6 +541,24 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
                 }
 
                 else -> {}
+            }
+        } else if (towerMode.activeChoice == ScaffoldTowerMotion &&
+            ScaffoldTowerMotion.placeOffOnNoInput && !player.moving) {
+            // Find the block closest to the player
+            val blocks = arrayOf(
+                blockPos.add(0, 0, 1),
+                blockPos.add(0, 0, -1),
+                blockPos.add(1, 0, 0),
+                blockPos.add(-1, 0, 0)
+            )
+
+            val blockOffset = blocks.minByOrNull {
+                it.getCenterDistanceSquared()
+            }?.add(0, -1, 0) ?: blockPos
+
+            // Check if block next to the player is solid
+            if (!blockOffset.getState()!!.isSolidBlock(world, blockOffset)) {
+                return blockOffset
             }
         }
 
@@ -592,7 +616,8 @@ object ModuleScaffold : Module("Scaffold", Category.WORLD) {
             val bestMainHandSlot = findBestValidHotbarSlotForTarget()
 
             if (bestMainHandSlot != null) {
-                SilentHotbar.selectSlotSilently(this, bestMainHandSlot, ScaffoldAutoBlockFeature.slotResetDelay)
+                SilentHotbar.selectSlotSilently(this, bestMainHandSlot,
+                    ScaffoldAutoBlockFeature.slotResetDelay)
 
                 return true
             } else {

@@ -27,9 +27,11 @@ import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.event.repeatable
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleFakeLag
 import net.ccbluex.liquidbounce.features.module.modules.exploit.ModuleClickTp
+import net.ccbluex.liquidbounce.features.module.modules.exploit.disabler.disablers.DisablerVerusExperimental
 import net.ccbluex.liquidbounce.features.module.modules.movement.ModuleInventoryMove
 import net.ccbluex.liquidbounce.features.module.modules.movement.autododge.ModuleAutoDodge
 import net.ccbluex.liquidbounce.features.module.modules.movement.fly.modes.specific.FlyNcpClip
+import net.ccbluex.liquidbounce.features.module.modules.movement.fly.modes.verus.FlyVerusB3869Flat
 import net.ccbluex.liquidbounce.features.module.modules.movement.noslow.modes.blocking.NoSlowBlockingBlink
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleAntiVoid
 import net.ccbluex.liquidbounce.features.module.modules.player.ModuleBlink
@@ -77,15 +79,22 @@ object FakeLag : Listenable {
      * Whether we should lag.
      * Implement your module here if you want to enable lag.
      */
+    @Suppress("ReturnCount")
     private fun shouldLag(packet: Packet<*>?): LagResult? {
+        // need this to run even if not in-game
+        if (DisablerVerusExperimental.shouldBlink(packet) || DisablerVerusExperimental.shouldPrepareToFlush(packet)) {
+            return LagResult.QUEUE
+        }
+
         if (!inGame) {
             return null
         }
 
+        @Suppress("ComplexCondition")
         if (ModuleBlink.enabled || ModuleAntiVoid.needsArtificialLag || ModuleFakeLag.shouldLag(packet)
             || NoFallBlink.shouldLag() || ModuleInventoryMove.Blink.shouldLag() || ModuleClickTp.requiresLag
             || FlyNcpClip.shouldLag
-            || ScaffoldBlinkFeature.shouldBlink) {
+            || ScaffoldBlinkFeature.shouldBlink || FlyVerusB3869Flat.requiresLag) {
             return LagResult.QUEUE
         }
 
@@ -161,7 +170,7 @@ object FakeLag : Listenable {
 
             // Prevent lagging inventory actions if inventory move blink is enabled
             is ClickSlotC2SPacket, is ButtonClickC2SPacket, is CreativeInventoryActionC2SPacket,
-                is SlotChangedStateC2SPacket -> {
+            is SlotChangedStateC2SPacket -> {
                 if (ModuleInventoryMove.Blink.shouldLag()) {
                     return@handler
                 }
@@ -370,7 +379,7 @@ object FakeLag : Listenable {
         val arrows = ModuleAutoDodge.findFlyingArrows(world)
         val playerSimulation = RigidPlayerSimulation(pos)
 
-        return ModuleAutoDodge.getInflictedHits(playerSimulation, arrows, maxTicks = 40) { }
+        return ModuleAutoDodge.getInflictedHits(playerSimulation, arrows, maxTicks = 40)
     }
 
     enum class LagResult {

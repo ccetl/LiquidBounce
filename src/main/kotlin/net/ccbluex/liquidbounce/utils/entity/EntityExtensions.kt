@@ -20,6 +20,7 @@ package net.ccbluex.liquidbounce.utils.entity
 
 import net.ccbluex.liquidbounce.utils.aiming.Rotation
 import net.ccbluex.liquidbounce.utils.client.mc
+import net.ccbluex.liquidbounce.utils.client.network
 import net.ccbluex.liquidbounce.utils.client.player
 import net.ccbluex.liquidbounce.utils.client.toRadians
 import net.ccbluex.liquidbounce.utils.math.minus
@@ -32,6 +33,8 @@ import net.minecraft.entity.LivingEntity
 import net.minecraft.entity.damage.DamageSource
 import net.minecraft.entity.effect.StatusEffects
 import net.minecraft.entity.player.PlayerEntity
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket
+import net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket
 import net.minecraft.scoreboard.ScoreboardDisplaySlot
 import net.minecraft.stat.Stats
 import net.minecraft.util.UseAction
@@ -138,6 +141,9 @@ fun getMovementDirectionOfInput(facingYaw: Float, input: DirectionalInput): Floa
 val PlayerEntity.sqrtSpeed: Double
     get() = velocity.sqrtSpeed
 
+val LivingEntity.nextTickPos: Vec3d
+    get() = pos.add(velocity)
+
 fun ClientPlayerEntity.upwards(height: Float, increment: Boolean = true) {
     // Might be a jump
     if (isOnGround && increment) {
@@ -154,8 +160,9 @@ fun ClientPlayerEntity.downwards(motion: Float) {
     velocityDirty = true
 }
 
-fun ClientPlayerEntity.strafe(yaw: Float = directionYaw, speed: Double = sqrtSpeed, strength: Double = 1.0) {
-    if (!moving) {
+fun ClientPlayerEntity.strafe(yaw: Float = directionYaw, speed: Double = sqrtSpeed, strength: Double = 1.0,
+                              keyboardCheck: Boolean = true) {
+    if (keyboardCheck && !moving) {
         velocity.x = 0.0
         velocity.z = 0.0
         return
@@ -358,7 +365,9 @@ fun LivingEntity.getActualHealth(fromScoreboard: Boolean = true): Float {
     if (fromScoreboard) {
         world.scoreboard.getObjectiveForSlot(ScoreboardDisplaySlot.BELOW_NAME)?.let { objective ->
             objective.scoreboard.getScore(this, objective)?.let { scoreboard ->
-                if (scoreboard.score > 0 && objective.displayName?.string == "❤") {
+                val displayName = objective.displayName
+
+                if (displayName != null && scoreboard.score > 0 && displayName.string.contains("❤")) {
                     return scoreboard.score.toFloat()
                 }
             }
@@ -384,4 +393,45 @@ fun Entity.isFallingToVoid(voidLevel: Double = -64.0, safetyExpand: Double = 0.0
         .expand(safetyExpand, 0.0, safetyExpand)
     return world.getBlockCollisions(this, boundingBox)
         .all { shape -> shape == VoxelShapes.empty() }
+}
+
+/**
+ * Check if the entity is likely falling to the void based on the given position and bounding box.
+ */
+fun Entity.wouldFallIntoVoid(pos: Vec3d, voidLevel: Double = -64.0, safetyExpand: Double = 0.0): Boolean {
+    val offsetBb = boundingBox.offset(pos - this.pos)
+
+    if (pos.y < voidLevel || offsetBb.minY < voidLevel) {
+        return true
+    }
+
+    // If there is no collision to void threshold, we do not want to teleport down.
+    val boundingBox = offsetBb
+        // Set the minimum Y to the void threshold to check for collisions below the player
+        .withMinY(voidLevel)
+        // Expand the bounding box to check if there might blocks to safely land on
+        .expand(safetyExpand, 0.0, safetyExpand)
+    return world.getBlockCollisions(this, boundingBox)
+        .all { shape -> shape == VoxelShapes.empty() }
+}
+
+
+fun Float.toValidYaw(): Float {
+    return ((this + 180) % 360) - 180
+}
+
+fun ClientPlayerEntity.warp(pos: Vec3d? = null, onGround: Boolean = false) {
+    val vehicle = this.vehicle
+
+    if (vehicle != null) {
+        pos?.let { pos -> vehicle.setPosition(pos) }
+        network.sendPacket(VehicleMoveC2SPacket(vehicle))
+        return
+    }
+
+    if (pos != null) {
+        network.sendPacket(PlayerMoveC2SPacket.PositionAndOnGround(pos.x, pos.y, pos.z, onGround))
+    } else {
+        network.sendPacket(PlayerMoveC2SPacket.OnGroundOnly(onGround))
+    }
 }

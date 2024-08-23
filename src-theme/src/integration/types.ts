@@ -6,6 +6,7 @@ export interface Module {
     description: string;
     hidden: boolean;
     aliases: string[];
+    tag: string | null;
 }
 
 export interface GroupedModules {
@@ -350,4 +351,8 @@ export interface ClientUpdate {
         message: string;
         url: string;
     }
+}
+
+export interface Browser {
+    url: string
 }

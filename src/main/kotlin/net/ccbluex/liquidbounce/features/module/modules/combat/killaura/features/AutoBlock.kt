@@ -68,6 +68,13 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
      * @see net.minecraft.client.render.item.HeldItemRenderer renderFirstPersonItem
      */
     var blockVisual = false
+        get() = field && super.handleEvents()
+
+    val shouldUnblockToHit
+        get() = unblockMode != UnblockMode.NONE
+
+    val blockImmediate
+        get() = tickOn == 0 || blockMode == BlockMode.WATCHDOG
 
     /**
      * Make it seem like the player is blocking.
@@ -84,7 +91,7 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
      * Starts blocking.
      */
     fun startBlocking() {
-        if (!enabled || player.isBlockAction) {
+        if (!enabled || (player.isBlockAction && blockMode != BlockMode.WATCHDOG)) {
             return
         }
 
@@ -93,13 +100,10 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
             return
         }
 
-        val blockHand = if (canBlock(player.mainHandStack)) {
-            Hand.MAIN_HAND
-        } else if (canBlock(player.offHandStack)) {
-            Hand.OFF_HAND
-        } else {
-            // We cannot block with any item.
-            return
+        val blockHand = when {
+            canBlock(player.mainHandStack) -> Hand.MAIN_HAND
+            canBlock(player.offHandStack) -> Hand.OFF_HAND
+            else -> return  // We cannot block with any item.
         }
 
         val itemStack = player.getStackInHand(blockHand)
@@ -115,7 +119,18 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
             return
         }
 
-        if (blockMode == BlockMode.INTERACT) {
+        if (blockMode == BlockMode.WATCHDOG) {
+            val currentSlot = player.inventory.selectedSlot
+            val nextSlot = (currentSlot + 1) % 9
+
+            network.sendPacket(UpdateSelectedSlotC2SPacket(nextSlot))
+            network.sendPacket(UpdateSelectedSlotC2SPacket(currentSlot))
+
+            // We interact below as well. I am not sure if this is part of the magic bypass or an oversight.
+            interactWithFront()
+        }
+
+        if (blockMode == BlockMode.INTERACT || blockMode == BlockMode.WATCHDOG) {
             interactWithFront()
         }
 
@@ -137,13 +152,19 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
         }
 
         // We do not want the player to stop eating or else. Only when he blocks.
-        if (player.isBlockAction && !mc.options.useKey.isPressed) {
-            if (unblockMode == UnblockMode.STOP_USING_ITEM) {
+        if (!player.isBlockAction || mc.options.useKey.isPressed) {
+            return false
+        }
+
+        return when {
+            unblockMode == UnblockMode.STOP_USING_ITEM -> {
                 interaction.stopUsingItem(player)
 
                 blockingStateEnforced = false
-                return true
-            } else if (unblockMode == UnblockMode.CHANGE_SLOT) {
+                true
+            }
+
+            unblockMode == UnblockMode.CHANGE_SLOT -> {
                 val currentSlot = player.inventory.selectedSlot
                 val nextSlot = (currentSlot + 1) % 9
 
@@ -152,11 +173,17 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
                 network.sendPacket(UpdateSelectedSlotC2SPacket(currentSlot))
 
                 blockingStateEnforced = false
-                return true
+                true
             }
-        }
 
-        return false
+            unblockMode == UnblockMode.NONE && !pauses -> {
+                interaction.stopUsingItem(player)
+
+                blockingStateEnforced = false
+                true
+            }
+            else -> false
+        }
     }
 
     val changeSlot = handler<PacketEvent> {
@@ -226,12 +253,14 @@ object AutoBlock : ToggleableConfigurable(ModuleKillAura, "AutoBlocking", false)
     enum class BlockMode(override val choiceName: String) : NamedChoice {
         BASIC("Basic"),
         INTERACT("Interact"),
-        FAKE("Fake")
+        WATCHDOG("Watchdog117"),
+        FAKE("Fake"),
     }
 
     enum class UnblockMode(override val choiceName: String) : NamedChoice {
         STOP_USING_ITEM("StopUsingItem"),
-        CHANGE_SLOT("ChangeSlot")
+        CHANGE_SLOT("ChangeSlot"),
+        NONE("None")
     }
 
 }

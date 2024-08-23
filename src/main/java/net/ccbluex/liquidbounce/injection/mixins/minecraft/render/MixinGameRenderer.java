@@ -28,6 +28,7 @@ import net.ccbluex.liquidbounce.event.events.ScreenRenderEvent;
 import net.ccbluex.liquidbounce.event.events.WorldRenderEvent;
 import net.ccbluex.liquidbounce.features.module.modules.fun.ModuleDankBobbing;
 import net.ccbluex.liquidbounce.features.module.modules.render.*;
+import net.ccbluex.liquidbounce.features.module.modules.world.ModuleLiquidPlace;
 import net.ccbluex.liquidbounce.interfaces.PostEffectPassTextureAddition;
 import net.ccbluex.liquidbounce.render.engine.UIRenderer;
 import net.ccbluex.liquidbounce.utils.aiming.RaytracingExtensionsKt;
@@ -111,7 +112,7 @@ public abstract class MixinGameRenderer {
                         new Rotation(camera.getYaw(tickDelta), camera.getPitch(tickDelta));
 
         return RaytracingExtensionsKt.raycast(rotation, Math.max(blockInteractionRange, entityInteractionRange),
-                false, tickDelta);
+                ModuleLiquidPlace.INSTANCE.getEnabled(), tickDelta);
     }
 
     @ModifyExpressionValue(method = "findCrosshairTarget", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/Entity;getRotationVec(F)Lnet/minecraft/util/math/Vec3d;"))
@@ -156,7 +157,7 @@ public abstract class MixinGameRenderer {
 
     @Inject(method = "bobView", at = @At("HEAD"), cancellable = true)
     private void injectBobView(MatrixStack matrixStack, float f, CallbackInfo callbackInfo) {
-        if (ModuleNoBob.INSTANCE.getEnabled()) {
+        if (ModuleNoBob.INSTANCE.getEnabled() || ModuleTracers.INSTANCE.getEnabled()) {
             callbackInfo.cancel();
             return;
         }

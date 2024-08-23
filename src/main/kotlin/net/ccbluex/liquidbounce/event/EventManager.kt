@@ -39,6 +39,7 @@ val ALL_EVENT_CLASSES: Array<KClass<out Event>> = arrayOf(
     OverlayRenderEvent::class,
     ScreenRenderEvent::class,
     WindowResizeEvent::class,
+    FrameBufferResizeEvent::class,
     MouseButtonEvent::class,
     MouseScrollEvent::class,
     MouseCursorEvent::class,
@@ -110,13 +111,16 @@ val ALL_EVENT_CLASSES: Array<KClass<out Event>> = arrayOf(
     ComponentsUpdate::class,
     ResourceReloadEvent::class,
     ProxyAdditionResultEvent::class,
+    ProxyEditResultEvent::class,
     ProxyCheckResultEvent::class,
     ScaleFactorChangeEvent::class,
     DrawOutlinesEvent::class,
     OverlayMessageEvent::class,
     ScheduleInventoryActionEvent::class,
     SpaceSeperatedNamesChangeEvent::class,
-    ClickGuiScaleChangeEvent::class
+    ClickGuiScaleChangeEvent::class,
+    BrowserUrlChangeEvent::class,
+    TagEntityEvent::class
 )
 
 /**
